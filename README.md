@@ -1,6 +1,6 @@
 Dedupe
 ======
-Note:  Core is currently a work in progress.
+Note:  Code is currently a work in progress.
 
 Python-based tool to detect deduplication candidates for inline dedupe.  Includes support both whole-file and sub-block use-cases.
 
