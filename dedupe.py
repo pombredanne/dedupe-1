@@ -16,6 +16,8 @@ import pdb          #used for debug only
 #
 #       1) Add command line parsing
 #       2) Optimize detected subgraphs
+#       3) Clean-up handling of Globals
+#       4) Deallocate unused datastructures after pickling, where appropriate.
 #
 # Generall Approach
 #
@@ -56,8 +58,8 @@ global fno2fname_map
 global hval2hno_map
 global hno2hval_map
 global hno_counts
-
 global dup_map
+global display_graph_flag
 
 #------------------------------------
 # Misc helper func
@@ -341,19 +343,23 @@ def filter_partitions(partitions, graph) :
             else :
                 new_part['c'].append(nodenum)
         if len(new_part['f']) > 1 :  #only sub-graphs with multiple files
+            pprint.pprint(new_part)
             new_part['n'] = part
             new_part['g'] = nx.subgraph(B, part)
             process_subgraph(new_part['g'], new_part['f'])
             result.append(new_part)
-        pprint.pprint(new_part)
     return result
 
 def process_subgraph(graph, files) :
-    nx.draw(graph)
-    plt.show()        
+    global display_graph_flag
     proj = bipartite.overlap_weighted_projected_graph(graph, files)
-    nx.draw(proj)
-    plt.show()
+    if  display_graph_flag:
+        print 'Bipartite Sub-Graph'
+        nx.draw(graph)
+        plt.show()
+        print 'Projected Sub-Graph'
+        nx.draw(proj)
+        plt.show()
     
 def graph_analysis(vector_set) :
     global B
@@ -376,6 +382,11 @@ def graph_analysis(vector_set) :
     dpprint(Filtered_Partitions, True)
     #G = bipartite.overlap_weighted_projected_graph(B, files)
 
+def subgraph_analysis(bsub, gsub) :
+    "not yet implemented"
+    return
+   
+
 def output_vectors(name, vset):
     fd = open(name, 'w+')
     for vec in vset:
@@ -387,11 +398,10 @@ def output_vectors(name, vset):
 #------------------------------------
 
 
-
-
 if __name__=="__main__":
-    debug = False
-    status = True
+    debug = False             #enable debug message output
+    status = True             #enable general status logging
+    display_graph_flag = True #enables plotting of sub-graphs for debug
     
     #input files
     d_file = '/users/doug/SW_Dev/dedupe/input_files/file_hashes_sorted.out'    
