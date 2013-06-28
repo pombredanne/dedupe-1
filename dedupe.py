@@ -346,13 +346,31 @@ def filter_partitions(partitions, graph) :
             pprint.pprint(new_part)
             new_part['n'] = part
             new_part['g'] = nx.subgraph(B, part)
-            process_subgraph(new_part['g'], new_part['f'])
+            process_subgraph(new_part['g'], new_part['f'], new_part['c'])
             result.append(new_part)
     return result
 
-def process_subgraph(graph, files) :
+def process_subgraph(graph, files, csums) :
     global display_graph_flag
-    proj = bipartite.overlap_weighted_projected_graph(graph, files)
+    proj = bipartite.overlap_weighted_projected_graph(graph, files, csums)
+    if True:
+        print
+        print 'file centric analysis'
+        clustering = nx.bipartite.clustering(graph, files)       
+        print 'avg_clust:{}'.format(nx.bipartite.average_clustering(graph, files))
+        for node in files:
+            pprint.pprint(node)
+            print("file:{} edges: {}".format(node, len(nx.edges(graph, node))))           
+            print 'clust:{}'.format(clustering[node])
+        print
+        print 'checksum centric analysis'
+        clustering = nx.bipartite.clustering(graph, csums)       
+        print 'avg_clust:{}'.format(nx.bipartite.average_clustering(graph, files))
+        for node in csums:
+            pprint.pprint(node)
+            print("csum:{} edges: {}".format(node, len(nx.edges(graph, node))))           
+            print 'clust:{}'.format(clustering[node])
+                
     if  display_graph_flag:
         print 'Bipartite Sub-Graph'
         nx.draw(graph)
