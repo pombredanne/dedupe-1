@@ -15,6 +15,22 @@ Tool bases anaylyis on a set-of MD5 checksum files, who file and sub-file, compu
        2) Alternative checksums, such as SHA256 can be used.  If so, 
           sort command key parameter may need to be modified to reflect checksum width      
 
+Command line
+     Usage: dedupe.py [options] whole_checksums [sorted_block_checksums]
+
+     Options:
+       -h, --help            show this help message and exit
+       -c TYPE, --checksum_type=TYPE
+                             format of checksum in input file, where checksum TYPE
+                             is MD% or SHA256
+       -v, --dump_vectors
+                             enables dumping of vectors to .vectors file for use
+                             with alternative analysis
+       -s, --status          prints status information to console
+       -d, --debug           logs information to console for debug purposes
+       -g, --show_graph      displays sub-graphs to console for debug purposes
+
+
 Generall Approach
 
 1) Gather whole-file and sub-file signatures (MD5). See above.
