@@ -3,8 +3,10 @@ import networkx as nx
 from networkx.algorithms import bipartite
 import matplotlib.pyplot as plt
 import cPickle as pickle
+import string
 import json
 import re
+from optparse import OptionParser
 import pprint       #used for debug only
 import pdb          #used for debug only
 #sys.path.append('/users/doug/SW_Dev/dedupe/')
@@ -14,7 +16,7 @@ import pdb          #used for debug only
 #
 # To Do:
 #
-#       1) Add command line parsing
+#       1) Update command line parsing.  Replace with argparse since optparse depricated as of Python 2.7
 #       2) Optimize detected subgraphs
 #       3) Clean-up handling of Globals
 #       4) Deallocate unused datastructures after pickling, where appropriate.
@@ -47,6 +49,11 @@ import pdb          #used for debug only
 #             iii) Optimize sub-graphs
 #                  a) Project each sub-graph as nodes and jacquard 
 #
+#
+#   Proposed approach for sub-graph grouping
+#   create set of checksums that have highest affinity,
+#   starting with most popular checksum.  make sure that offsets don't collide.
+
 #------------------------------------------------------------------
 
 
@@ -114,7 +121,9 @@ def dpprint(val, debug, nl=False):
         print
     pprint.pprint(val)
 
-        
+def parse_fname(text):
+    return rsplit(text, '.', 1)
+    
         
 #--------------------------------------
 # File level deduplication
@@ -203,14 +212,15 @@ def hval2hno(val) :
     global hval2hno_map
     global hno2hval_map
     global hno_counts
-    if val in hval2hno_map :
-        hno = hval2hno_map[val]
+    fingerprint = val['c']+val['r'] #include range in checksum name
+    if fingerprint in hval2hno_map :
+        hno = hval2hno_map[fingerprint]
         hno_counts[hno] = hno_counts[hno] + 1
         
         return hno
     else :
         hno = len(hno2hval_map)
-        hval2hno_map[val] = hno
+        hval2hno_map[fingerprint] = hno
         hno2hval_map.append(val)
         hno_counts.append(1)
         return hno
@@ -222,11 +232,9 @@ def parse_md5deep_subfile_entry(text, include_offset=True) :
     "processing of individual subdile block hash line in md5deep"
     parse = md5deep_subfile_re.search(text)
     if parse :
-        if include_offset:
-            return('{}_{}_{}'.format(parse.groups()[0], parse.groups()[2], parse.groups()[3]),
-                   parse.groups()[1])
-        else:
-            return(parse.groups()[0], parse.groups()[1])               
+        return({'c': parse.groups()[0],
+                'r':'_{}_{}'.format(parse.groups()[2], parse.groups()[3])},
+               parse.groups()[1])               
     else:
         print 'not found: ' + text
         exit()
@@ -249,7 +257,7 @@ def construct_subhash_vectors(fname, debug=False) :
     for text in fd:
         (val, name) = parse_md5deep_subfile_entry(text)
         dprint('name: ' + name, debug)
-        dprint('val :' + val, debug)
+        dprint('val :' + val['c'], debug)
         
         if name <> last_name :
             dprint(last_name, debug)
@@ -299,6 +307,7 @@ def prune_vectors(vector_set) :
 def find_subfile_duplicates(dsub_file, pickle_duplicates_fname=False,
                             pickle_vectorset_fname=False,
                             json_vectorset_fname=False,
+                            list_vectorset_fname = False,
                             debug=False,
                             status=True) :
 
@@ -315,12 +324,11 @@ def find_subfile_duplicates(dsub_file, pickle_duplicates_fname=False,
     vector_set = construct_subhash_vectors(dsub_file)
 
     dprint('pruning', status, nl=True)
-    #output_vectors('/users/doug/SW_Dev/dedupe/output_files/file_64k_vectors.txt', vector_set)
     pruned_vector_set = prune_vectors(vector_set)
     
     pdump(vector_set, pickle_vectorset_fname)
     jdump(vector_set, json_vectorset_fname)
-    #output_vectors('/users/doug/SW_Dev/dedupe/output_files/file_64k_vectors_pruned.txt', vector_set)
+    output_vectors(list_vectorset_fname, vector_set)
   
     return pruned_vector_set
 
@@ -384,13 +392,14 @@ def graph_analysis(vector_set) :
     global G
     global Partitions
     global Filtered_Partitions
+    global hno2hval_map
     B = nx.Graph()
     for fno, hset in vector_set:
         #print '{} {}'.format(fno, hset)
         B.add_node(fno, bipartite=0)
         for hno in hset :
             if hno not in B :
-                B.add_node(hno, bipartite=1)
+                B.add_node(hno, bipartite=1, range=hno2hval_map[hno]['r'])
             B.add_edge(fno, hno)
     print 'done'
     files, hashes = bipartite.sets(B)
@@ -406,6 +415,8 @@ def subgraph_analysis(bsub, gsub) :
    
 
 def output_vectors(name, vset):
+    if not name:
+        return
     fd = open(name, 'w+')
     for vec in vset:
         fd.write('{}, {}'.format(vec, tuple))
@@ -414,33 +425,79 @@ def output_vectors(name, vset):
 #------------------------------------
 # Main
 #------------------------------------
-
+idle_flag = True    #used when bypassing command line during debug with Python IDLE environment
 
 if __name__=="__main__":
-    debug = False             #enable debug message output
-    status = True             #enable general status logging
-    display_graph_flag = True #enables plotting of sub-graphs for debug
-    
-    #input files
-    d_file = '/users/doug/SW_Dev/dedupe/input_files/file_hashes_sorted.out'    
-    #d_file = '/users/doug/SW_Dev/dedupe/inpute_files/sorted_test_hashes.out'
-    dsub_file = '/users/doug/SW_Dev/dedupe/input_files/file_64k_subhashes.out'
-    #dsub_file = '/users/doug/SW_Dev/dedupe/input_files/file_1m_subhashes.out'
-    #dsub_file = '/users/doug/SW_Dev/dedupe/input_files/test_subhashes.out'
 
-    #output files
-    pdup_fname = '/users/doug/SW_Dev/dedupe/output_files/duplicates.p'
-    jdup_fname = '/users/doug/SW_Dev/dedupe/output_files/duplicates.json'
-    pvec_fname = False
-    #pvec_fname = '/users/doug/SW_Dev/dedupe/output_files/vectorset.p'
-    jvec_fname = False
-    #jvec_fname = '/users/doug/SW_Dev/dedupe/output_files/vectorset.json'
+
+    parser = OptionParser(usage="usage: %prog [options] whole_checksums sorted_block_checksums")
+
     
-    find_duplicateFiles(d_file, pickle_duplicates_fname=pdup_fname,
-                        json_duplicates_fname=jdup_fname) 
+    parser.add_option("-c", "--checksum_type", type = 'string', default = "MD5", dest="hash_type",
+                      help="format of checksum in input file, where checksum TYPE is MD% or SHA256",
+                      metavar="TYPE")   
+
+    parser.add_option("-v", "--dump_vectors", type = 'string', default = -1, dest="dump_vectors",
+                      help="enables dumping of vectors to .vectors file for use with alternative analysis")
+
+    parser.add_option("-s", "--status", default=False, action="store_true", dest="status",
+                      help="prints status information to console")
+
+    parser.add_option("-d", "--debug", default=False, action="store_true", dest="debug",
+                      help="logs information to console for debug purposes")    
+
+    parser.add_option("-g", "--show_graph", default=False, action="store_true", dest="show_graphs",
+                      help="displays sub-graphs to console for debug purposes")
+    
+    (options, args) = parser.parse_args()
+    
+    global d_file        #for IDLE, delete once idle_flag conditional removed
+    global dsub_file     #for IDLE
+
+
+    debug = False                   #for IDLE -- enable debug message output
+    status = True                   #for IDLE -- enable general status logging
+    enable_subfile_analysis = True  #for IDLE
+    display_graph_flag = True       #for IDLE -- enables plotting of sub-graphs for debug
+    enable_subfile_analysis = True
+    
+    if idle_flag :    #special case behavior when debugging with IDLE
+        #input files
+        d_file = '/users/doug/SW_Dev/dedupe/input_files/file_hashes_sorted.out'    
+        #d_file = '/users/doug/SW_Dev/dedupe/inpute_files/sorted_test_hashes.out'
+        dsub_file = '/users/doug/SW_Dev/dedupe/input_files/file_64k_subhashes.out'
+        #dsub_file = '/users/doug/SW_Dev/dedupe/input_files/file_1m_subhashes.out'
+        #dsub_file = '/users/doug/SW_Dev/dedupe/input_files/test_subhashes.out'
+    else:
+        debug = options.debug
+        status = options.status
+        display_graph_flag = options.show_graphs
+        if args:
+            d_file = args[0]
+            if len(args) == 2:
+                d_subfile = args[1]
+                enable_subfile_analysis = True
+            else:
+                enable_subfile_analysis = False
+        else :
+            raise MissingInputFiles
+        
+    (d_file_base, ext) = string.rsplit(d_file, '.', 1)
+    jdup_fname = d_file_base + '.json'      
+    find_duplicateFiles(d_file, json_duplicates_fname=jdup_fname)
+
+
+    (d_subfile_base, ext) = string.rsplit(dsub_file, '.', 1)
+    jvec_fname = False
+    lvec_fname = False
+    if options.dump_vectors:
+        jvec_fname = d_subfile_base + 'vect.json' #Should this option be deleted?
+        lvec_fname = d_subfile_base + 'vect.txt'
+
+        
     vector_set = find_subfile_duplicates(dsub_file,
-                                         pickle_vectorset_fname=pvec_fname,
-                                         json_vectorset_fname=jvec_fname)
+                                         json_vectorset_fname=jvec_fname,
+                                         list_vectorset_fname=lvec_fname)
 
     dprint('graph analysis', status)
     dpprint(vector_set, False)
