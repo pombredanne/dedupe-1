@@ -430,14 +430,14 @@ idle_flag = True    #used when bypassing command line during debug with Python I
 if __name__=="__main__":
 
 
-    parser = OptionParser(usage="usage: %prog [options] whole_checksums sorted_block_checksums")
+    parser = OptionParser(usage="usage: %prog [options] whole_checksums [sorted_block_checksums]")
 
     
     parser.add_option("-c", "--checksum_type", type = 'string', default = "MD5", dest="hash_type",
                       help="format of checksum in input file, where checksum TYPE is MD% or SHA256",
                       metavar="TYPE")   
 
-    parser.add_option("-v", "--dump_vectors", type = 'string', default = -1, dest="dump_vectors",
+    parser.add_option("-v", "--dump_vectors", default=False, action="store_true", dest="dump_vectors",
                       help="enables dumping of vectors to .vectors file for use with alternative analysis")
 
     parser.add_option("-s", "--status", default=False, action="store_true", dest="status",
@@ -492,7 +492,7 @@ if __name__=="__main__":
     lvec_fname = False
     if options.dump_vectors:
         jvec_fname = d_subfile_base + 'vect.json' #Should this option be deleted?
-        lvec_fname = d_subfile_base + 'vect.txt'
+        lvec_fname = d_subfile_base + 'vectors'
 
         
     vector_set = find_subfile_duplicates(dsub_file,
