@@ -122,7 +122,7 @@ def dpprint(val, debug, nl=False):
     pprint.pprint(val)
 
 def parse_fname(text):
-    return rsplit(text, '.', 1)
+    return string.rsplit(text, '.', 1)
     
         
 #--------------------------------------
@@ -165,7 +165,7 @@ def identify_duplicates(fname) :
     return duplicates
 
 def create_duplicate_map (duplicates) :
-    "creates a suplicate map, indexed by first duplicate file"
+    "creates a duplicate map, indexed by first duplicate file"
     global dup_map
     dup_map = {}
     for dup_group in duplicates :
@@ -207,6 +207,17 @@ def fname2fno(fname) :
     fno2fname_map.append(fname)
     return fno
 
+def encode_fno(fno):
+    "adds type prefix to fno -- ensures uniqueness since fno and hno share same node namespace"
+    return 'F:{}'.format(fno)
+
+def decode_fno(text):
+    "strip off prefix and return numeric value"
+    global fno2fname_map
+    (node_type, fno) = string.rsplit(text, ':', 1)
+    return int(fno)
+
+
 def hval2hno(val) :
     "Maps hashes to unique hash numbers and maintains mapping tables"
     global hval2hno_map
@@ -215,8 +226,7 @@ def hval2hno(val) :
     fingerprint = val['c']+val['r'] #include range in checksum name
     if fingerprint in hval2hno_map :
         hno = hval2hno_map[fingerprint]
-        hno_counts[hno] = hno_counts[hno] + 1
-        
+        hno_counts[hno] += 1
         return hno
     else :
         hno = len(hno2hval_map)
@@ -224,6 +234,15 @@ def hval2hno(val) :
         hno2hval_map.append(val)
         hno_counts.append(1)
         return hno
+
+def encode_hno(hno):
+    "adds type prefix to hno -- ensures uniqueness since fno and hno share same node namespace"
+    return 'H:{}'.format(hno)
+
+def decode_hno(text):
+    "strip off prefix and return numeric value"
+    (node_type, hno) = string.rsplit(text, ':', 1)
+    return int(hno)
 
 #parse entry in format hash filename offset start-end
 md5deep_subfile_re = re.compile("([0-9abcdef]+)\s+(\S.+)\soffset\s(\d+)-(\d+)$")
@@ -239,8 +258,24 @@ def parse_md5deep_subfile_entry(text, include_offset=True) :
         print 'not found: ' + text
         exit()
 
+
+def construct_vector(name, hash_set, debug=False) :
+    global dup_map
+    if name == "" :
+        dprint('skipping - no file; ' + name, debug)
+        return False
+    if name in dup_map:
+        dprint('skipping -- duplicate: ' + name, debug)
+        return False
+    if len(hash_set) < 2 :
+        dprint('skipping -- empty or singleton : ' + name, debug)
+        return False
+
+    return [fname2fno(name), [hval2hno(hval) for hval in hash_set]]
+
+
 def construct_subhash_vectors(fname, debug=False) :
-    "collect set of checksums per file, substituting text values to numbers"
+    "collect set of checksums per file, substituting numeric id (fno, hno) for text values"
     global fno2fname_map
     global hval2hno_map
     global hno_counts
@@ -276,22 +311,8 @@ def construct_subhash_vectors(fname, debug=False) :
     fd.close()
     return result
 
-
-def construct_vector(name, hash_set, debug=False) :
-    global dup_map
-    if name == "" :
-        dprint('skipping - no file; ' + name, debug)
-        return False
-    if name in dup_map:
-        dprint('skipping -- duplicate: ' + name, debug)
-        return False
-    if len(hash_set) < 2 :
-        dprint('skipping -- empty or singleton : ' + name, debug)
-        return False
-
-    return [fname2fno(name), [hval2hno(hval) for hval in hash_set]]
-
 def prune_vectors(vector_set) :
+    "only keep vectors containing at least 1 shared checksum"
     global hno_counts
     result = []
     
@@ -303,14 +324,25 @@ def prune_vectors(vector_set) :
         if len(newset) > 0:
             result.append([fno, newset])        
     return result
-       
-def find_subfile_duplicates(dsub_file, pickle_duplicates_fname=False,
-                            pickle_vectorset_fname=False,
-                            json_vectorset_fname=False,
-                            list_vectorset_fname = False,
-                            debug=False,
-                            status=True) :
 
+
+def output_vectors(name, vset):
+    "dumps vectors for use with alternative clustering tools"
+    if not name:
+        return
+    fd = open(name, 'w+')
+    for vec in vset:
+        fd.write('{}, {}'.format(vec, tuple))
+    fd.close()
+
+       
+def generate_subfile_vectors(dsub_file, pickle_duplicates_fname=False,
+                             pickle_vectorset_fname=False,
+                             json_vectorset_fname=False,
+                             list_vectorset_fname = False,
+                             debug=False,
+                             status=True) :
+    "top level routine - convert file checksums to vectors, pruning non-shared entries"
     global duplicates
     global dup_map     
 
@@ -332,33 +364,92 @@ def find_subfile_duplicates(dsub_file, pickle_duplicates_fname=False,
   
     return pruned_vector_set
 
+#----------------------------
+# Clustering and Subgraph Optimization
+#----------------------------
+
+def file_conflicting_checksums(csums, graph):
+    "find those block checksums that map to the same file region"
+    global hno2hval_map
+    range_sets = {}
+    for hno in csums:
+        range = hno2hval_map[decode_hno(hno)]['r']
+        if range in range_sets:
+            range_sets[range] |= hno
+        else:
+            range_sets[range] = [hno]
+    #pprint.pprint(range_sets)   
+    return {key: value for key, value in range_sets.items() 
+            if len(value) > 1}
+
+
+def process_subgraph(graph, files, csums) :
+    global display_graph_flag
+    #global fno2fname_map
+    #global hno2hval_map
+    #global B
+    conflicts = file_conflicting_checksums(csums, graph)
+    if len(conflicts) > 0:
+        print
+        print 'conflicting checksums'
+        pprint.pprint(conflicts)
+        raise ConflictingChecksums(conflicts)
+    else:
+        print 'proposed parent'
+        pprint.pprint([hno2hval_map[decode_hno(hno)] for hno in csums])
+        print 'files'
+        pprint.pprint([fno2fname_map[decode_fno(fno)] for fno in files])
+
+
 def filter_partitions(partitions, graph) :
-    global G
-    global B
-    nodes, checksums =  bipartite.sets(B) 
+    "processing of individual sub-graph"
+    #global B
+    nodes, checksums =  bipartite.sets(graph) 
     result = []
     for part in partitions :
-        #pprint.pprint(part)
-        new_part = {'f':[],'c':[]}
+        new_part = {'f':[],'h':[]}
         for nodenum in part :
-            #pprint.pprint(nodenum)
-            #print 'G'
-            #pprint.pprint(G[nodenum])
-            #print 'B'
-            #pprint.pprint(B[nodenum])
-            if nodenum in nodes:
+            if nodenum[0] == 'F':
                 new_part['f'].append(nodenum)
             else :
-                new_part['c'].append(nodenum)
+                new_part['h'].append(nodenum)
         if len(new_part['f']) > 1 :  #only sub-graphs with multiple files
-            pprint.pprint(new_part)
+            #pprint.pprint(new_part)
             new_part['n'] = part
-            new_part['g'] = nx.subgraph(B, part)
-            process_subgraph(new_part['g'], new_part['f'], new_part['c'])
+            new_part['g'] = nx.subgraph(graph, part)
+            process_subgraph(new_part['g'], new_part['f'], new_part['h'])
             result.append(new_part)
     return result
 
-def process_subgraph(graph, files, csums) :
+
+def graph_analysis(vector_set) :
+    "top level routine, partitions vector sets and identified common parent for a set of files"
+    #global B
+    global hno2hval_map
+    B = nx.Graph()
+    for fno, hset in vector_set:
+        #print '{} {}'.format(fno, hset)
+        B.add_node(encode_fno(fno), bipartite=0)
+        for hno in hset :
+            if hno not in B :
+                B.add_node(encode_hno(hno), bipartite=1,
+                           range=hno2hval_map[hno]['r'])
+            B.add_edge(encode_fno(fno), encode_hno(hno))
+    print 'done'
+    #files, hashes = bipartite.sets(B)
+    partitions = nx.connected_components(B)
+    filtered_partitions = filter_partitions(partitions, B)
+    return filtered_partitions
+
+
+#--------------------------------
+# Boneyard - node to be deleted in subsequent version
+#--------------------------------
+def subgraph_analysis(bsub, gsub) :
+    "not yet implemented"
+    return
+
+def old_process_subgraph(graph, files, csums) :
     global display_graph_flag
     proj = bipartite.overlap_weighted_projected_graph(graph, files, csums)
     if True:
@@ -378,50 +469,21 @@ def process_subgraph(graph, files, csums) :
             pprint.pprint(node)
             print("csum:{} edges: {}".format(node, len(nx.edges(graph, node))))           
             print 'clust:{}'.format(clustering[node])
+        print 'find conflicting checksums'
+        conflicts = file_conflicting_checksums(csums, graph)
+        if len(conflicts) > 0:
+            print
+            print 'conflicting checksums'
+            pprint.pprint(conflicts)
                 
-    if  display_graph_flag:
-        print 'Bipartite Sub-Graph'
-        nx.draw(graph)
-        plt.show()
-        print 'Projected Sub-Graph'
-        nx.draw(proj)
-        plt.show()
-    
-def graph_analysis(vector_set) :
-    global B
-    global G
-    global Partitions
-    global Filtered_Partitions
-    global hno2hval_map
-    B = nx.Graph()
-    for fno, hset in vector_set:
-        #print '{} {}'.format(fno, hset)
-        B.add_node(fno, bipartite=0)
-        for hno in hset :
-            if hno not in B :
-                B.add_node(hno, bipartite=1, range=hno2hval_map[hno]['r'])
-            B.add_edge(fno, hno)
-    print 'done'
-    files, hashes = bipartite.sets(B)
-    G = bipartite.overlap_weighted_projected_graph(B, files)
-    Partitions = nx.connected_components(B)
-    Filtered_Partitions = filter_partitions(Partitions, B)
-    dpprint(Filtered_Partitions, True)
-    #G = bipartite.overlap_weighted_projected_graph(B, files)
-
-def subgraph_analysis(bsub, gsub) :
-    "not yet implemented"
-    return
-   
-
-def output_vectors(name, vset):
-    if not name:
-        return
-    fd = open(name, 'w+')
-    for vec in vset:
-        fd.write('{}, {}'.format(vec, tuple))
-    fd.close()
-        
+            if  display_graph_flag:
+                print 'Bipartite Sub-Graph'
+                nx.draw(graph)
+                plt.show()
+                print 'Projected Sub-Graph'
+                nx.draw(proj)
+                plt.show()
+           
 #------------------------------------
 # Main
 #------------------------------------
@@ -495,9 +557,9 @@ if __name__=="__main__":
         lvec_fname = d_subfile_base + 'vectors'
 
         
-    vector_set = find_subfile_duplicates(dsub_file,
-                                         json_vectorset_fname=jvec_fname,
-                                         list_vectorset_fname=lvec_fname)
+    vector_set = generate_subfile_vectors(dsub_file,
+                                          json_vectorset_fname=jvec_fname,
+                                          list_vectorset_fname=lvec_fname)
 
     dprint('graph analysis', status)
     dpprint(vector_set, False)
