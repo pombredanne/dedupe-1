@@ -18,8 +18,7 @@ import pdb          #used for debug only
 #
 #       1) Update command line parsing.  Replace with argparse since optparse depricated as of Python 2.7
 #       2) Optimize detected subgraphs
-#       3) Clean-up handling of Globals, CONVERT MAPS TO CLASSES
-#       4) Deallocate unused datastructures after pickling, where appropriate.
+#       3) Deallocate unused datastructures after pickling, where appropriate.
 #
 # Generall Approach
 #
@@ -56,16 +55,10 @@ import pdb          #used for debug only
 #   Proposed approach for sub-graph grouping
 #   create set of checksums that have highest affinity,
 #   starting with most popular checksum.  make sure that offsets don't collide.
-
+#
 #------------------------------------------------------------------
 
 
-#-----------------------------------
-# Global Variables
-#-----------------------------------
-           
-global display_graph_flag
-global B
 
 #------------------------------------
 # Misc helper func
@@ -163,6 +156,7 @@ def identify_duplicates(fname) :
     fd.close()
     return duplicates
 
+
 def create_duplicate_map (duplicates) :
     "creates a duplicate map, indexed by first duplicate file"
     dup_map = {}
@@ -171,6 +165,7 @@ def create_duplicate_map (duplicates) :
         for secondary in dup_group:
             dup_map[secondary] = primary
     return dup_map
+
 
 def find_duplicateFiles(d_file, pickle_duplicates_fname=False,
                         json_duplicates_fname=False,
@@ -388,7 +383,7 @@ class ChecksumMap:
 #parse entry in format hash filename offset start-end
 md5deep_subfile_re = re.compile("([0-9abcdef]+)\s+(\S.+)\soffset\s(\d+)-(\d+)$")
 
-def parse_md5deep_subfile_entry(text, include_offset=True) :
+def parse_md5deep_subfile_entry(text) :
     "processing of individual subdile block hash line in md5deep"
     parse = md5deep_subfile_re.search(text)
     if parse :
@@ -396,26 +391,21 @@ def parse_md5deep_subfile_entry(text, include_offset=True) :
                 'r':'_{}_{}'.format(parse.groups()[2], parse.groups()[3])},
                parse.groups()[1])               
     else:
-        print 'not found: ' + text
-        exit()
+        raise BadSubfileEntry(text)
 
 
-def construct_vector(name, hash_set, dup_map, debug=False) :
-    if name == "" :
-        dprint('skipping - no file; ' + name, debug)
+def construct_vector(name, hash_set, dup_map) :
+    if name == "" :         #skipping - no file
         return False
-    if name in dup_map:
-        dprint('skipping -- duplicate: ' + name, debug)
+    if name in dup_map:     #skipping -- duplicate
         return False
-    if len(hash_set) < 2 :
-        dprint('skipping -- empty or singleton : ' + name, debug)
+    if len(hash_set) < 2 :  #skipping -- empty or singleton
         return False
-
     return [FnameMap.get_id(name),
             [ChecksumMap.get_id(hval) for hval in hash_set]]
 
 
-def construct_subhash_vectors(fname, dup_map, debug=False) :
+def construct_subhash_vectors(fname, dup_map) :
     "collect set of checksums per file, substituting numeric id (fno, hno) for text values"
 
     result = []    
@@ -427,14 +417,10 @@ def construct_subhash_vectors(fname, dup_map, debug=False) :
     hash_set = []
     for text in fd:
         (val, name) = parse_md5deep_subfile_entry(text)
-        dprint('name: ' + name, debug)
-        dprint('val :' + val['c'], debug)
         
         if name <> last_name :
-            dprint(last_name, debug)
             vec = construct_vector(last_name, hash_set, dup_map)
             if vec:
-                dpprint(vec, debug)
                 result.append(vec)
             last_name = name
             hash_set = []
@@ -511,75 +497,68 @@ def file_conflicting_checksums(csums, graph):
         if range in range_sets:
             range_sets[range] |= hno
         else:
-            range_sets[range] = [hno]
-    #pprint.pprint(range_sets)   
+            range_sets[range] = [hno]  
     return {key: value for key, value in range_sets.items() 
             if len(value) > 1}
 
 
-def process_subgraph(graph, files, csums) :
-    global display_graph_flag
-    #global B
+def process_subgraph(graph, files, csums, show_subgraph=False) :
+
     conflicts = file_conflicting_checksums(csums, graph)
     if len(conflicts) > 0:
-        print
-        print 'conflicting checksums'
-        pprint.pprint(conflicts)
+        # function not yet implemented.  Raise exception to identify potential
+        # use cases
         raise ConflictingChecksums(conflicts)
     else:
-        print 'proposed parent'
-        pprint.pprint([ChecksumMap.get_hval_using_encoded_id(hno) for hno in csums])
+        proposed_parent_checksums = [ChecksumMap.get_hval_using_encoded_id(hno) for hno in csums]
+        proposed_child_files = [FnameMap.get_name_using_encoded_id(fno) for fno in files]
+        print 'proposed parent checksums:'
+        pprint.pprint(proposed_parent_checksums)
         print 'files'
-        pprint.pprint([FnameMap.get_name_using_encoded_id(fno) for fno in files])
+        pprint.pprint(proposed_child_files)
+        return (proposed_parent_checksums, proposed_child_files)
 
 
-def filter_partitions(partitions, graph) :
+def filter_partitions(partitions, graph, show_subgraph=False) :
     "processing of individual sub-graph"
-    #global B
+    
     nodes, checksums =  bipartite.sets(graph) 
     result = []
     for part in partitions :
-        new_part = {'f':[],'h':[]}
+        new_part = {'f':[],'c':[]}
         for nodenum in part :
             if nodenum[0] == 'F':
                 new_part['f'].append(nodenum)
             else :
-                new_part['h'].append(nodenum)
+                new_part['c'].append(nodenum)
         if len(new_part['f']) > 1 :  #only sub-graphs with multiple files
-            #pprint.pprint(new_part)
             new_part['n'] = part
             new_part['g'] = nx.subgraph(graph, part)
-            process_subgraph(new_part['g'], new_part['f'], new_part['h'])
+            process_subgraph(new_part['g'], new_part['f'],
+                             new_part['c'], show_subgraph=show_subgraph)
             result.append(new_part)
     return result
 
 
-def graph_analysis(vector_set) :
+def graph_analysis(vector_set, show_subgraph=False) :
     "top level routine, partitions vector sets and identified common parent for a set of files"
-    global B
+
     B = nx.Graph()
     for fno, hset in vector_set:
-        #print '{} {}'.format(fno, hset)
         B.add_node(FnameMap.encode(fno), bipartite=0)
         for hno in hset :
             if hno not in B :
                 B.add_node(ChecksumMap.encode(hno), bipartite=1)               
-                #B.add_node(ChecksumMap.encode(hno), bipartite=1,
-                #           range=hno2hval_map[hno]['r'])
             B.add_edge(FnameMap.encode(fno), ChecksumMap.encode(hno))
-    print 'done'
-    #files, hashes = bipartite.sets(B)
+    print 'graph_analysis done'
     partitions = nx.connected_components(B)
-    filtered_partitions = filter_partitions(partitions, B)
+    filtered_partitions = filter_partitions(partitions, B, show_subgraph=show_subgraph)
     return filtered_partitions
 
 
 #--------------------------------
 # Boneyard - node to be deleted in subsequent version
 #--------------------------------
-def subgraph_analysis(bsub, gsub) :
-    "not yet implemented"
-    return
 
 def old_process_subgraph(graph, files, csums) :
     global display_graph_flag
@@ -694,5 +673,4 @@ if __name__=="__main__":
                                           list_vectorset_fname=lvec_fname)
 
     dprint('graph analysis', status)
-    dpprint(vector_set, False)
-    graph_analysis(vector_set)
+    graph_analysis(vector_set, show_subgraph=display_graph_flag)
