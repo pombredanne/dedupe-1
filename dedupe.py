@@ -64,7 +64,6 @@ import pdb          #used for debug only
 # Global Variables
 #-----------------------------------
            
-global fno2fname_map
 global hval2hno_map
 global hno2hval_map
 global hno_counts
@@ -189,6 +188,79 @@ def find_duplicateFiles(d_file, pickle_duplicates_fname=False,
     jdump(duplicates, json_duplicates_fname)
     return duplicates
 
+
+#---------------------------------------------------
+# Tables for mapping fname and hash values to numeric keys
+#---------------------------------------------------
+
+
+class FnameMap(object):
+    """
+    Class for mapping file names to numeric key
+    >>> FnameMap.reset()
+    >>> FnameMap.get_id('aaa')
+    0
+    >>> FnameMap.get_id('bbb')
+    1
+    >>> FnameMap.get_id('ccc')
+    2
+    >>> FnameMap.get_name(0)
+    'aaa'
+    >>> FnameMap.get_name(1)
+    'bbb'
+    >>> FnameMap.get_name(2)
+    'ccc'
+    >>> FnameMap.get_name_using_encoded_id('F:2')
+    'ccc'
+    >>> FnameMap.reset()
+    >>> FnameMap.get_id('ddd')
+    0
+    >>> FnameMap.get_name(0)
+    'ddd'
+    >>> FnameMap.reset()
+    """
+
+    map2val = []  #maps id to file name
+    
+    @classmethod
+    def get_id(cls, text) :
+        "Maps file names to unique file numbers and maintains mapping tables"
+        idx = len(cls.map2val)
+        cls.map2val.append(text)
+        return idx
+    
+    @classmethod
+    def get_name(cls, idx) :
+        return cls.map2val[idx]
+
+    @classmethod
+    def get_name_using_encoded_id(cls, eidx):
+        return cls.map2val[cls.decode(eidx)]
+    
+    @classmethod
+    def reset(cls):
+        cls.map2val = []
+
+    @staticmethod
+    def encode(idx):
+        """
+        adds type prefix to fno -- ensures uniqueness since fno
+        and hno share same node namespace
+        >>> FnameMap.encode(1)
+        'F:1'
+        """
+        return 'F:{}'.format(idx)
+
+    @staticmethod
+    def decode(text):
+        """
+        strip off prefix and return numeric value
+        >>> FnameMap.decode('F:1')
+        1
+        """
+        (node_type, idx) = string.rsplit(text, ':', 1)
+        return int(idx)
+
     
 #----------------------------------------------------
 # Processing of subfile hashes and convert to vector
@@ -201,22 +273,6 @@ def find_duplicateFiles(d_file, pickle_duplicates_fname=False,
 #  e) convert hashes into vector -- fileno + hashno's
 #
 
-def fname2fno(fname) :
-    "Maps file names to unique file numbers and maintains mapping tables"
-    global fno2fname_map
-    fno = len(fno2fname_map)
-    fno2fname_map.append(fname)
-    return fno
-
-def encode_fno(fno):
-    "adds type prefix to fno -- ensures uniqueness since fno and hno share same node namespace"
-    return 'F:{}'.format(fno)
-
-def decode_fno(text):
-    "strip off prefix and return numeric value"
-    global fno2fname_map
-    (node_type, fno) = string.rsplit(text, ':', 1)
-    return int(fno)
 
 
 def hval2hno(val) :
@@ -271,19 +327,19 @@ def construct_vector(name, hash_set, dup_map, debug=False) :
         dprint('skipping -- empty or singleton : ' + name, debug)
         return False
 
-    return [fname2fno(name), [hval2hno(hval) for hval in hash_set]]
+    return [FnameMap.get_id(name), [hval2hno(hval) for hval in hash_set]]
 
 
 def construct_subhash_vectors(fname, dup_map, debug=False) :
     "collect set of checksums per file, substituting numeric id (fno, hno) for text values"
-    global fno2fname_map
     global hval2hno_map
     global hno_counts
     global hno2hval_map
-    fno2fname_map = []
     hval2hno_map = {}
     hno2hval_map = []
     hno_counts = []
+    
+    FnameMap.reset()
     result = []
 
     fd = open(fname)
@@ -384,7 +440,6 @@ def file_conflicting_checksums(csums, graph):
 
 def process_subgraph(graph, files, csums) :
     global display_graph_flag
-    #global fno2fname_map
     #global hno2hval_map
     #global B
     conflicts = file_conflicting_checksums(csums, graph)
@@ -397,7 +452,7 @@ def process_subgraph(graph, files, csums) :
         print 'proposed parent'
         pprint.pprint([hno2hval_map[decode_hno(hno)] for hno in csums])
         print 'files'
-        pprint.pprint([fno2fname_map[decode_fno(fno)] for fno in files])
+        pprint.pprint([FnameMap.get_name_using_encoded_id(fno) for fno in files])
 
 
 def filter_partitions(partitions, graph) :
@@ -428,12 +483,12 @@ def graph_analysis(vector_set) :
     B = nx.Graph()
     for fno, hset in vector_set:
         #print '{} {}'.format(fno, hset)
-        B.add_node(encode_fno(fno), bipartite=0)
+        B.add_node(FnameMap.encode(fno), bipartite=0)
         for hno in hset :
             if hno not in B :
                 B.add_node(encode_hno(hno), bipartite=1,
                            range=hno2hval_map[hno]['r'])
-            B.add_edge(encode_fno(fno), encode_hno(hno))
+            B.add_edge(FnameMap.encode(fno), encode_hno(hno))
     print 'done'
     #files, hashes = bipartite.sets(B)
     partitions = nx.connected_components(B)
