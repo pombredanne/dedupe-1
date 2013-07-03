@@ -64,10 +64,8 @@ import pdb          #used for debug only
 # Global Variables
 #-----------------------------------
            
-global hval2hno_map
-global hno2hval_map
-global hno_counts
 global display_graph_flag
+global B
 
 #------------------------------------
 # Misc helper func
@@ -261,6 +259,118 @@ class FnameMap(object):
         (node_type, idx) = string.rsplit(text, ':', 1)
         return int(idx)
 
+
+
+class ChecksumMap:    
+    """
+    Class for mapping checksum values to numeric key, and maintaining counts
+    >>> ChecksumMap.reset()
+    >>> ChecksumMap.get_id({'c':'aaa', 'r':'x'})
+    0
+    >>> ChecksumMap.get_id({'c':'bbb', 'r':'y'})
+    1
+    >>> ChecksumMap.get_id({'c':'ccc', 'r':'z'})
+    2
+    >>> ChecksumMap.get_id({'c':'bbb', 'r':'y'})
+    1
+    >>> ChecksumMap.get_id({'c':'ccc', 'r':'z'})
+    2
+    >>> ChecksumMap.get_id({'c':'bbb', 'r':'y'})
+    1
+    >>> ChecksumMap.get_hval(0)
+    {'c': 'aaa', 'r': 'x'}
+    >>> ChecksumMap.get_hval(1)
+    {'c': 'bbb', 'r': 'y'}
+    >>> ChecksumMap.get_hval(2)
+    {'c': 'ccc', 'r': 'z'}
+    >>> ChecksumMap.get_count(0)
+    1
+    >>> ChecksumMap.get_count(1)
+    3
+    >>> ChecksumMap.get_count(2)
+    2
+    >>> ChecksumMap.reset()
+    >>> ChecksumMap.get_id({'c':'ddd', 'r':'q'})
+    0
+    >>> ChecksumMap.get_hval(0)
+    {'c': 'ddd', 'r': 'q'}
+    >>> ChecksumMap.get_count(0)
+    1
+    >>> ChecksumMap.get_encoded_id({'c':'eee', 'r':'r'})
+    'H:1'
+    >>> ChecksumMap.get_hval_using_encoded_id('H:1')
+    {'c': 'eee', 'r': 'r'}
+    >>> ChecksumMap.get_range_using_encoded_id('H:1')
+    'r'
+    >>> ChecksumMap.reset()
+    """
+
+    map2idx = {}
+    map2hval = []
+    counts = []
+
+    @classmethod
+    def get_id(cls, hval) :
+        "Maps hashes to unique hash numbers and maintains mapping tables"
+        fingerprint = hval['c']+hval['r'] #include range in checksum name
+        if fingerprint in cls.map2idx:
+            idx = cls.map2idx[fingerprint]
+            cls.counts[idx] += 1
+            return idx
+        else :
+            idx = len(cls.map2hval)
+            cls.map2idx[fingerprint] = idx
+            cls.map2hval.append(hval)
+            cls.counts.append(1)
+            return idx
+        
+    @classmethod
+    def get_encoded_id(cls, hval):
+        return cls.encode(cls.get_id(hval))
+        
+    @classmethod
+    def get_hval(cls, idx) :
+        return cls.map2hval[idx]
+
+    @classmethod
+    def get_hval_using_encoded_id(cls, eidx):
+        return cls.map2hval[cls.decode(eidx)]
+        
+    @classmethod
+    def get_range_using_encoded_id(cls, eidx):
+        return cls.map2hval[cls.decode(eidx)]['r']
+    
+    @classmethod
+    def get_count(cls,idx) :
+        return cls.counts[idx]
+    
+    @classmethod
+    def reset(cls):
+        cls.map2idx = {}
+        cls.map2hval = []
+        cls.counts = []
+
+    @staticmethod
+    def encode(idx):
+        """
+        adds type prefix to hno -- ensures uniqueness since fno
+        and hno share same node namespace
+        >>> ChecksumMap.encode(1)
+        'H:1'
+        """
+        return 'H:{}'.format(idx)
+
+    @staticmethod
+    def decode(text):
+        """
+        strip off prefix and return numeric value
+        >>> ChecksumMap.decode('H:1')
+        1
+        """
+        (node_type, idx) = string.rsplit(text, ':', 1)
+        return int(idx)
+    
+
     
 #----------------------------------------------------
 # Processing of subfile hashes and convert to vector
@@ -274,32 +384,6 @@ class FnameMap(object):
 #
 
 
-
-def hval2hno(val) :
-    "Maps hashes to unique hash numbers and maintains mapping tables"
-    global hval2hno_map
-    global hno2hval_map
-    global hno_counts
-    fingerprint = val['c']+val['r'] #include range in checksum name
-    if fingerprint in hval2hno_map :
-        hno = hval2hno_map[fingerprint]
-        hno_counts[hno] += 1
-        return hno
-    else :
-        hno = len(hno2hval_map)
-        hval2hno_map[fingerprint] = hno
-        hno2hval_map.append(val)
-        hno_counts.append(1)
-        return hno
-
-def encode_hno(hno):
-    "adds type prefix to hno -- ensures uniqueness since fno and hno share same node namespace"
-    return 'H:{}'.format(hno)
-
-def decode_hno(text):
-    "strip off prefix and return numeric value"
-    (node_type, hno) = string.rsplit(text, ':', 1)
-    return int(hno)
 
 #parse entry in format hash filename offset start-end
 md5deep_subfile_re = re.compile("([0-9abcdef]+)\s+(\S.+)\soffset\s(\d+)-(\d+)$")
@@ -327,20 +411,16 @@ def construct_vector(name, hash_set, dup_map, debug=False) :
         dprint('skipping -- empty or singleton : ' + name, debug)
         return False
 
-    return [FnameMap.get_id(name), [hval2hno(hval) for hval in hash_set]]
+    return [FnameMap.get_id(name),
+            [ChecksumMap.get_id(hval) for hval in hash_set]]
 
 
 def construct_subhash_vectors(fname, dup_map, debug=False) :
     "collect set of checksums per file, substituting numeric id (fno, hno) for text values"
-    global hval2hno_map
-    global hno_counts
-    global hno2hval_map
-    hval2hno_map = {}
-    hno2hval_map = []
-    hno_counts = []
-    
-    FnameMap.reset()
-    result = []
+
+    result = []    
+    FnameMap.reset()        #initialize mapping tables
+    ChecksumMap.reset()
 
     fd = open(fname)
     last_name = ""
@@ -369,13 +449,12 @@ def construct_subhash_vectors(fname, dup_map, debug=False) :
 
 def prune_vectors(vector_set) :
     "only keep vectors containing at least 1 shared checksum"
-    global hno_counts
     result = []
     
     for fno, hset in vector_set :
         newset = []
         for hno in hset:
-            if hno_counts[hno] > 1:
+            if ChecksumMap.get_count(hno) > 1:
                 newset.append(hno)
         if len(newset) > 0:
             result.append([fno, newset])        
@@ -428,7 +507,7 @@ def file_conflicting_checksums(csums, graph):
     global hno2hval_map
     range_sets = {}
     for hno in csums:
-        range = hno2hval_map[decode_hno(hno)]['r']
+        range = ChecksumMap.get_range_using_encoded_id(hno)
         if range in range_sets:
             range_sets[range] |= hno
         else:
@@ -440,7 +519,6 @@ def file_conflicting_checksums(csums, graph):
 
 def process_subgraph(graph, files, csums) :
     global display_graph_flag
-    #global hno2hval_map
     #global B
     conflicts = file_conflicting_checksums(csums, graph)
     if len(conflicts) > 0:
@@ -450,7 +528,7 @@ def process_subgraph(graph, files, csums) :
         raise ConflictingChecksums(conflicts)
     else:
         print 'proposed parent'
-        pprint.pprint([hno2hval_map[decode_hno(hno)] for hno in csums])
+        pprint.pprint([ChecksumMap.get_hval_using_encoded_id(hno) for hno in csums])
         print 'files'
         pprint.pprint([FnameMap.get_name_using_encoded_id(fno) for fno in files])
 
@@ -478,17 +556,17 @@ def filter_partitions(partitions, graph) :
 
 def graph_analysis(vector_set) :
     "top level routine, partitions vector sets and identified common parent for a set of files"
-    #global B
-    global hno2hval_map
+    global B
     B = nx.Graph()
     for fno, hset in vector_set:
         #print '{} {}'.format(fno, hset)
         B.add_node(FnameMap.encode(fno), bipartite=0)
         for hno in hset :
             if hno not in B :
-                B.add_node(encode_hno(hno), bipartite=1,
-                           range=hno2hval_map[hno]['r'])
-            B.add_edge(FnameMap.encode(fno), encode_hno(hno))
+                B.add_node(ChecksumMap.encode(hno), bipartite=1)               
+                #B.add_node(ChecksumMap.encode(hno), bipartite=1,
+                #           range=hno2hval_map[hno]['r'])
+            B.add_edge(FnameMap.encode(fno), ChecksumMap.encode(hno))
     print 'done'
     #files, hashes = bipartite.sets(B)
     partitions = nx.connected_components(B)
