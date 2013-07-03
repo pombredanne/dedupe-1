@@ -598,7 +598,7 @@ def old_process_subgraph(graph, files, csums) :
 #------------------------------------
 # Main
 #------------------------------------
-idle_flag = True    #used when bypassing command line during debug with Python IDLE environment
+idle_flag = False    #used when bypassing command line during debug with Python IDLE environment
 
 if __name__=="__main__":
 
@@ -648,7 +648,7 @@ if __name__=="__main__":
         if args:
             d_file = args[0]
             if len(args) == 2:
-                d_subfile = args[1]
+                dsub_file = args[1]
                 enable_subfile_analysis = True
             else:
                 enable_subfile_analysis = False
@@ -659,18 +659,16 @@ if __name__=="__main__":
     jdup_fname = d_file_base + '.json'      
     duplicates = find_duplicateFiles(d_file, json_duplicates_fname=jdup_fname)
 
-
-    (d_subfile_base, ext) = string.rsplit(dsub_file, '.', 1)
-    jvec_fname = False
-    lvec_fname = False
-    if options.dump_vectors:
-        jvec_fname = d_subfile_base + 'vect.json' #Should this option be deleted?
-        lvec_fname = d_subfile_base + 'vectors'
-
-        
-    vector_set = generate_subfile_vectors(dsub_file, duplicates,
-                                          json_vectorset_fname=jvec_fname,
-                                          list_vectorset_fname=lvec_fname)
-
-    dprint('graph analysis', status)
-    graph_analysis(vector_set, show_subgraph=display_graph_flag)
+    if enable_subfile_analysis : 
+        (d_subfile_base, ext) = string.rsplit(dsub_file, '.', 1)
+        jvec_fname = False
+        lvec_fname = False
+        if options.dump_vectors:
+            jvec_fname = d_subfile_base + 'vect.json' #Should this option be deleted?
+            lvec_fname = d_subfile_base + 'vectors'
+   
+        vector_set = generate_subfile_vectors(dsub_file, duplicates,
+                                              json_vectorset_fname=jvec_fname,
+                                              list_vectorset_fname=lvec_fname)
+        dprint('graph analysis', status)
+        graph_analysis(vector_set, show_subgraph=display_graph_flag)
