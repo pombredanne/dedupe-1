@@ -18,7 +18,7 @@ import pdb          #used for debug only
 #
 #       1) Update command line parsing.  Replace with argparse since optparse depricated as of Python 2.7
 #       2) Optimize detected subgraphs
-#       3) Clean-up handling of Globals
+#       3) Clean-up handling of Globals, CONVERT MAPS TO CLASSES
 #       4) Deallocate unused datastructures after pickling, where appropriate.
 #
 # Generall Approach
@@ -47,7 +47,10 @@ import pdb          #used for debug only
 #             i)   Construct bipartite graph nodes =(files, checksums)
 #             ii)  Identify connected sub-graphs
 #             iii) Optimize sub-graphs
-#                  a) Project each sub-graph as nodes and jacquard 
+#                  a) Determine whether checksums are mutually compatible (ie: non-overlapping ranges)
+#                     1) if so, combine all checksums as common parent
+#                     2) if not, determine most important checksums, also,
+#                        determine if should partition graph
 #
 #
 #   Proposed approach for sub-graph grouping
@@ -65,7 +68,6 @@ global fno2fname_map
 global hval2hno_map
 global hno2hval_map
 global hno_counts
-global dup_map
 global display_graph_flag
 
 #------------------------------------
@@ -166,20 +168,18 @@ def identify_duplicates(fname) :
 
 def create_duplicate_map (duplicates) :
     "creates a duplicate map, indexed by first duplicate file"
-    global dup_map
     dup_map = {}
     for dup_group in duplicates :
         primary = dup_group.pop()
         for secondary in dup_group:
-            dup_map[secondary] = primary 
+            dup_map[secondary] = primary
+    return dup_map
 
 def find_duplicateFiles(d_file, pickle_duplicates_fname=False,
                         json_duplicates_fname=False,
                         debug=False,
                         status=True) :
     "find all duplicate files based on sorted MD5 hashes"
-    global duplicates
-    global dup_map
 
     dprint('identify duplicates', status)
     duplicates = identify_duplicates(d_file)
@@ -187,6 +187,7 @@ def find_duplicateFiles(d_file, pickle_duplicates_fname=False,
     dprint('dumping duplicates data structures', status)
     pdump(duplicates, pickle_duplicates_fname)
     jdump(duplicates, json_duplicates_fname)
+    return duplicates
 
     
 #----------------------------------------------------
@@ -259,8 +260,7 @@ def parse_md5deep_subfile_entry(text, include_offset=True) :
         exit()
 
 
-def construct_vector(name, hash_set, debug=False) :
-    global dup_map
+def construct_vector(name, hash_set, dup_map, debug=False) :
     if name == "" :
         dprint('skipping - no file; ' + name, debug)
         return False
@@ -274,7 +274,7 @@ def construct_vector(name, hash_set, debug=False) :
     return [fname2fno(name), [hval2hno(hval) for hval in hash_set]]
 
 
-def construct_subhash_vectors(fname, debug=False) :
+def construct_subhash_vectors(fname, dup_map, debug=False) :
     "collect set of checksums per file, substituting numeric id (fno, hno) for text values"
     global fno2fname_map
     global hval2hno_map
@@ -296,7 +296,7 @@ def construct_subhash_vectors(fname, debug=False) :
         
         if name <> last_name :
             dprint(last_name, debug)
-            vec = construct_vector(last_name, hash_set)
+            vec = construct_vector(last_name, hash_set, dup_map)
             if vec:
                 dpprint(vec, debug)
                 result.append(vec)
@@ -305,7 +305,7 @@ def construct_subhash_vectors(fname, debug=False) :
             
         hash_set.append(val)
         
-    vec = construct_vector(name, hash_set)
+    vec = construct_vector(name, hash_set, dup_map)
     if vec:
         result.append(vec)
     fd.close()
@@ -336,24 +336,23 @@ def output_vectors(name, vset):
     fd.close()
 
        
-def generate_subfile_vectors(dsub_file, pickle_duplicates_fname=False,
+def generate_subfile_vectors(dsub_file, duplicates,
+                             pickle_duplicates_fname=False,
                              pickle_vectorset_fname=False,
                              json_vectorset_fname=False,
                              list_vectorset_fname = False,
                              debug=False,
                              status=True) :
-    "top level routine - convert file checksums to vectors, pruning non-shared entries"
-    global duplicates
-    global dup_map     
+    "top level routine - convert file checksums to vectors, pruning non-shared entries"   
 
     dprint('creating duplicates map', status, nl=True)
     if pickle_duplicates_fname :
         dprint('restoring duplicates data structure', status)
         duplicates = pload(pickle_duplicates_fname) 
-    create_duplicate_map (duplicates)
+    dup_map = create_duplicate_map (duplicates)
 
     dprint('processing sub-file hashes', status, nl=True)
-    vector_set = construct_subhash_vectors(dsub_file)
+    vector_set = construct_subhash_vectors(dsub_file, dup_map)
 
     dprint('pruning', status, nl=True)
     pruned_vector_set = prune_vectors(vector_set)
@@ -546,7 +545,7 @@ if __name__=="__main__":
         
     (d_file_base, ext) = string.rsplit(d_file, '.', 1)
     jdup_fname = d_file_base + '.json'      
-    find_duplicateFiles(d_file, json_duplicates_fname=jdup_fname)
+    duplicates = find_duplicateFiles(d_file, json_duplicates_fname=jdup_fname)
 
 
     (d_subfile_base, ext) = string.rsplit(dsub_file, '.', 1)
@@ -557,7 +556,7 @@ if __name__=="__main__":
         lvec_fname = d_subfile_base + 'vectors'
 
         
-    vector_set = generate_subfile_vectors(dsub_file,
+    vector_set = generate_subfile_vectors(dsub_file, duplicates,
                                           json_vectorset_fname=jvec_fname,
                                           list_vectorset_fname=lvec_fname)
 
