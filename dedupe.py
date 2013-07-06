@@ -7,6 +7,7 @@ import string
 import json
 import re
 from optparse import OptionParser
+import itertools
 import pprint       #used for debug only
 import pdb          #used for debug only
 #sys.path.append('/users/doug/SW_Dev/dedupe/')
@@ -258,7 +259,7 @@ def construct_subhash_vectors(fname, dup_map) :
     fd.close()
     return result
 
-def prune_vectors(vector_set) :
+def prune_vectors(vector_set, min_blocks) :
     "only keep vectors containing at least 1 shared checksum"
     result = []
     
@@ -267,7 +268,7 @@ def prune_vectors(vector_set) :
         for hno in hset:
             if ChecksumMap.get_count(hno) > 1:
                 newset.append(hno)
-        if len(newset) > 0:
+        if len(newset) >= min_blocks:
             result.append([fno, newset])        
     return result
 
@@ -282,7 +283,7 @@ def output_vectors(name, vset):
     fd.close()
 
        
-def generate_subfile_vectors(dsub_file, duplicates,
+def generate_subfile_vectors(dsub_file, duplicates, min_blocks,
                              pickle_duplicates_fname=False,
                              pickle_vectorset_fname=False,
                              json_vectorset_fname=False,
@@ -301,7 +302,7 @@ def generate_subfile_vectors(dsub_file, duplicates,
     vector_set = construct_subhash_vectors(dsub_file, dup_map)
 
     dprint('pruning', status, nl=True)
-    pruned_vector_set = prune_vectors(vector_set)
+    pruned_vector_set = prune_vectors(vector_set, min_blocks)
     
     pdump(vector_set, pickle_vectorset_fname)
     jdump(vector_set, json_vectorset_fname)
@@ -313,27 +314,64 @@ def generate_subfile_vectors(dsub_file, duplicates,
 # Clustering and Subgraph Optimization
 #----------------------------
 
-def file_conflicting_checksums(csums, graph):
+def find_conflicting_checksums(csums, graph):
     "find those block checksums that map to the same file region"
-    global hno2hval_map
     range_sets = {}
     for hno in csums:
-        range = ChecksumMap.get_range_using_encoded_id(hno)
-        if range in range_sets:
-            range_sets[range] |= hno
+        range_val = ChecksumMap.get_range_using_encoded_id(hno)
+        if range_val in range_sets:
+            range_sets[range_val].append(hno)
         else:
-            range_sets[range] = [hno]  
-    return {key: value for key, value in range_sets.items() 
-            if len(value) > 1}
-
+            range_sets[range_val] = [hno]
+    print 'range sets:'        
+    pprint.pprint(range_sets)
+    return {'compatible':[value[0] for key, value in range_sets.items() if len(value) == 1],
+            #'conflicting': sum(value for key, value in range_sets.items() if len(value) > 1),
+            'conflicting': sum([value for key, value in range_sets.items() if len(value) > 1],[]),
+            'ranges': {key: value for key, value in range_sets.items() if len(value) > 1}}
 
 def process_subgraph(graph, files, csums, show_subgraph=False) :
+    print 'Bipartite Sub-Graph'
+    if show_subgraph:
+        nx.draw(graph)
+        plt.show()
+    result = find_conflicting_checksums(csums, graph)
+    common_csums = result['compatible']
+    conflicting_csums = result['conflicting']
+    conflict_details = result['ranges']
+    print 'conflicting_csums'
+    pprint.pprint(conflicting_csums)
+    print 'common_csums'
+    pprint.pprint(common_csums)
+    print 'conflict details'
+    pprint.pprint(conflict_details)
+    print 'files: '
+    pprint.pprint(files)
+    #force error
+    if len(conflicting_csums) > 0:
+        new_graph = nx.subgraph(graph, files + conflicting_csums)
+        nx.draw(graph)
+        plt.show()
+        # function not yet implemented -- proposed approach
+        # 1) create sub-graph with conflicting csums and fill set of files
+        # 2) gather names of files w/o edges to conflicting csums
+        # 2a) associate files with parsent
+        # 2b) prune file nodes from graph
+        # 3) attempt to partition sub-tree
+        # 3a) case 1: sub-graphs == 1, pick set of connflicts with greatest savings and
+        #     promote to parent
+        # 3b) perform similar analysis on each new partition
+        # 4) final optimization, select of one each partition set of promote based on
+        #     savings potential
+        print 'conflicting_csums'
+        pprint.pprint(conflicting_csums)
+        print 'common_csums'
+        pprint.pprint(common_csums)
+        print 'conflict details'
+        pprint.pprint(conflict_details)
+        raise ValueError(conflict_details)
 
-    conflicts = file_conflicting_checksums(csums, graph)
-    if len(conflicts) > 0:
-        # function not yet implemented.  Raise exception to identify potential
-        # use cases
-        raise ConflictingChecksums(conflicts)
+
     else:
         proposed_parent_checksums = [ChecksumMap.get_hval_using_encoded_id(hno) for hno in csums]
         proposed_child_files = [FnameMap.get_name_using_encoded_id(fno) for fno in files]
@@ -341,7 +379,14 @@ def process_subgraph(graph, files, csums, show_subgraph=False) :
         pprint.pprint(proposed_parent_checksums)
         print 'files'
         pprint.pprint(proposed_child_files)
-        return (proposed_parent_checksums, proposed_child_files)
+        tally = 0
+        for csum in csums:
+            tally += len(nx.edges(graph, csum)) - 1
+        print 'predicted savings: {} blocks'.format(tally)
+        return {'csums':proposed_parent_checksums,
+                'files':proposed_child_files,
+                'child_groups': [],
+                'savings':tally}
 
 
 def filter_partitions(partitions, graph, show_subgraph=False) :
@@ -350,6 +395,8 @@ def filter_partitions(partitions, graph, show_subgraph=False) :
     nodes, checksums =  bipartite.sets(graph) 
     result = []
     for part in partitions :
+        #print 'part:'
+        #pprint.pprint(part)
         new_part = {'f':[],'c':[]}
         for nodenum in part :
             if nodenum[0] == 'F':
@@ -361,6 +408,7 @@ def filter_partitions(partitions, graph, show_subgraph=False) :
             new_part['g'] = nx.subgraph(graph, part)
             process_subgraph(new_part['g'], new_part['f'],
                              new_part['c'], show_subgraph=show_subgraph)
+            #to do: collect result from process_subgraph
             result.append(new_part)
     return result
 
@@ -430,10 +478,13 @@ if __name__=="__main__":
 
     parser = OptionParser(usage="usage: %prog [options] whole_checksums [sorted_block_checksums]")
 
-    
     parser.add_option("-c", "--checksum_type", type = 'string', default = "MD5", dest="hash_type",
                       help="format of checksum in input file, where checksum TYPE is MD% or SHA256",
-                      metavar="TYPE")   
+                      metavar="TYPE")
+    
+    parser.add_option("-m", "--min_blocks", type = 'int', default = 2, dest="min_blocks",
+                      help="minimum number of BLOCKS that a file mush share to be considered a candidate for dedupe",
+                      metavar="BLOCKS")   
 
     parser.add_option("-v", "--dump_vectors", default=False, action="store_true", dest="dump_vectors",
                       help="enables dumping of vectors to .vectors file for use with alternative analysis")
@@ -457,6 +508,7 @@ if __name__=="__main__":
     status = True                   #for IDLE -- enable general status logging
     enable_subfile_analysis = True  #for IDLE
     display_graph_flag = True       #for IDLE -- enables plotting of sub-graphs for debug
+    min_blocks = 2                  #for IDLE, delete after debug
     enable_subfile_analysis = True
     
     if idle_flag :    #special case behavior when debugging with IDLE
@@ -469,6 +521,7 @@ if __name__=="__main__":
     else:
         debug = options.debug
         status = options.status
+        min_blocks = options.min_blocks
         display_graph_flag = options.show_graphs
         if args:
             d_file = args[0]
@@ -492,7 +545,7 @@ if __name__=="__main__":
             jvec_fname = d_subfile_base + 'vect.json' #Should this option be deleted?
             lvec_fname = d_subfile_base + 'vectors'
    
-        vector_set = generate_subfile_vectors(dsub_file, duplicates,
+        vector_set = generate_subfile_vectors(dsub_file, duplicates, min_blocks,
                                               json_vectorset_fname=jvec_fname,
                                               list_vectorset_fname=lvec_fname)
         dprint('graph analysis', status)
