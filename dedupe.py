@@ -334,7 +334,6 @@ def find_conflicting_checksums(csums, graph):
     conflicting = sum([value for key, value in range_sets.items() if len(value) > 1],[])
     ranges = {key: value for key, value in range_sets.items() if len(value) > 1}
     return compatible, conflicting, ranges
-    #return {'compat':compatible, 'conflict':conflicting, 'ranges':ranges}
 
 def path_pairs (path):
     """Converts path into a set of node pairs, where pairs are encoded as a _ delimitted string"""
@@ -363,50 +362,29 @@ def path_intersection(paths):
     return result
             
 def process_subgraph(graph, dedupe_group) :
-    print 'calling process_subgraph'
-    global process_subgraph_depth
-    process_subgraph_depth += 1
-    print 'depth: {}'.format(process_subgraph_depth)
-    pprint.pprint(dedupe_group)
     files = dedupe_group['files']
     csums = dedupe_group['csums']
-    if True:
+    if False:
         print 'Bipartite Sub-Graph'
         nx.draw(graph)
         plt.show()
     common_csums, conflicting_csums, conflict_details = find_conflicting_checksums(csums, graph)
-    print 'common_csums'
-    pprint.pprint(common_csums)
-    print 'conflicting_csums'
-    pprint.pprint(conflicting_csums)
-    print 'conflicting_details'
-    pprint.pprint(conflict_details)
-
 
     if len(conflict_details) > 0:
-        print 'conflict found'
         # create sub-graph with conflicting csums and fill set of files       
         new_graph = nx.subgraph(graph, files + conflicting_csums)
         partitions = nx.connected_components(new_graph)
-        print 'partitions: '
-        pprint.pprint(partitions)
-        print 'conflicting Sub-Graph'
-        for node in nx.nodes(new_graph):
-            print 'node: {}'.format(node)
-            pprint.pprint(new_graph[node])
-        nx.draw(new_graph)
-        plt.show()
+        if False:
+            nx.draw(new_graph)
+            plt.show()
 
         while len(partitions) == 1:
             #break-up monolithic partition -- find paths between conflict pairs and break shortest path.
-            print 'inside loop'
             paths = []
             for src, target in conflict_details.values():
-                print 'src: {}  dest:{}'.format(src, target)
                 paths.append(path_pairs(nx.shortest_path(new_graph, src, target)))
 
             common_paths = path_intersection(paths)
-            pprint.pprint(common_paths)
 
             #for now, just break the first path and interate.  In future, may want to break multiple paths at once
             if len(common_paths) == 0 or len(common_paths[0]) == 0:
@@ -415,13 +393,8 @@ def process_subgraph(graph, dedupe_group) :
             new_graph.remove_edge(pair[0], pair[1])
             partitions = nx.connected_components(new_graph)
             common_csums, conflicting_csums, conflict_details = find_conflicting_checksums(csums, new_graph)
-            nx.draw(new_graph)
-            plt.show()
             
-        print 'end of loop'
         subgroups = process_partitions(partitions, new_graph)
-        print 'after process_partitions'
-        pprint.pprint(subgroups)
         dedupe_group['subgroups'] = subgroups
 
     else:
@@ -442,14 +415,7 @@ def process_subgraph(graph, dedupe_group) :
     dedupe_group['selected_csums'] = set(dedupe_group['csums']) - set(subgroup_csums)
     for csum in csums:
         tally += len(nx.edges(graph, csum)) - 1
-    print 'predicted savings: {} blocks'.format(tally)
     dedupe_group['savings'] = tally
-    if True:
-        print 'returning from process_subgraph'
-        process_subgraph_depth -= 1
-        print 'depth: {}'.format(process_subgraph_depth)
-        print 'resulting dedupe_group'
-        pprint.pprint(dedupe_group)
     return dedupe_group
 
 def optimize_dedupe_group(dedupe_group):
@@ -460,32 +426,17 @@ def optimize_dedupe_group(dedupe_group):
 
 def process_partitions(partitions, graph, singleton_filter=False ) :
     "processing of individual sub-graph"
-    global process_partitions_depth
-    if False:
-        print 'calling process_partitions'
-        process_partitions_depth += 1
-        print 'depth: {}'.format(process_partitions_depth)
     dedupe_groups = []
     for part in partitions :
-        #print 'process_partitiot loop'
         files = [nodenum for nodenum in part if nodenum[0] == 'F']
-        #pprint.pprint(files)
         csums = [nodenum for nodenum in part if nodenum[0] == 'H']
-        #pprint.pprint(csums)
 
         if (len(files) > 1) or (not singleton_filter):  #only sub-graphs with multiple files
-            #print 'entering if'
             subgraph = nx.subgraph(graph, part)            
             dedupe_group = {'name':uuid.uuid4(), 'files':files, 'csums':csums}
             dedupe_group = process_subgraph(subgraph, dedupe_group)
             dedupe_group = optimize_dedupe_group(dedupe_group)
-            #print 'dedupe_group:'
-            #pprint.pprint(dedupe_group)
             dedupe_groups.append(dedupe_group)
-    if False:
-        print 'returning from process_partitions'
-        process_partitions_depth -= 1
-        print 'depth: {}'.format(process_partitions_depth)
     return dedupe_groups
 
 
@@ -516,6 +467,8 @@ def graph_analysis(vector_set) :
     B = build_graph_from_vectors(vector_set)
     partitions = nx.connected_components(B)
     dedupe_groups = process_partitions(partitions, B, singleton_filter = True)
+    for group in dedupe_groups:
+        pprint.pprint(group)
 
     # To Do: remember to annotate groups with resolved checksums and file names
     return dedupe_groups
