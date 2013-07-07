@@ -18,24 +18,26 @@ Tool bases anaylyis on a set-of MD5 checksum files, who file and sub-file, compu
 Command line
      Usage: dedupe.py [options] whole_checksums [sorted_block_checksums]
 
-     Options:
-       -h, --help            show this help message and exit
-       -c TYPE, --checksum_type=TYPE
-                             format of checksum in input file, where checksum TYPE
-                             is MD% or SHA256
-       -v, --dump_vectors
-                             enables dumping of vectors to .vectors file for use
-                             with alternative analysis
-       -s, --status          prints status information to console
-       -d, --debug           logs information to console for debug purposes
-       -g, --show_graph      displays sub-graphs to console for debug purposes
+	Options:
+	  -h, --help            show this help message and exit
+	  -c TYPE, --checksum_type=TYPE
+	                        format of checksum in input file, where checksum TYPE
+	                        is MD% or SHA256
+	  -m BLOCKS, --min_blocks=BLOCKS
+	                        minimum number of BLOCKS that a file mush share to be
+	                        considered a candidate for dedupe
+	  -v, --dump_vectors    enables dumping of vectors to .vectors file for use
+	                        with alternative analysis
+	  -d, --debug           logs information to console for debug purposes
+	  -g, --show_graph      displays sub-graphs to console for debug purposes
 
 
 Generall Approach
 
 1) Gather whole-file and sub-file signatures (MD5). See above.
 
-2) Identify same-file dedupe candidates.  Since file signatures were pre-sorted by signature, dedupes are simply sequences of files sharing the same signature
+2) Identify same-file dedupe candidates.  Since file signatures were pre-sorted 
+   by signature, dedupes are simply sequences of files sharing the same signature
 
 3) Identify sub-file dedupe candidates
    A) Compute vectors (edge sets)
@@ -51,6 +53,15 @@ Generall Approach
    B) Graph based analysis using Networkx
        i)   Construct bipartite graph nodes =(files, checksums)
       ii)  Identify connected sub-graphs
-     iii) Optimize sub-graphs
+           a) determine sets of conflicting checksums, where conflict define as
+              as set of checksums that map to the same range (offset) within the file
+           b) all non-conflicting checksums below to the top-level group, and prune 
+              from sub-graph
+           c) partition remaining sub-graphs
+              1) if partitions contain compatible sets of checksus, then structure
+                 as sub-group
+              2) if partition contains incompatible checksums, split subgraph
+                  by removing edges (based on paths between conflicting checksum pairs)
+
 
 
