@@ -164,14 +164,6 @@ def find_duplicateFiles(d_file, pickle_duplicates_fname=False,
 # Processing of subfile hashes and convert to vector
 #----------------------------------------------------
 
-#  a) aggregate all checksums associated with a file
-#  b) if file has been identified as a duplicate, discard
-#  c) assign fileno for each filename
-#  d) assign hashno for every unique hash
-#  e) convert hashes into vector -- fileno + hashno's
-#
-
-
 
 #parse entry in format hash filename offset start-end
 md5deep_subfile_re = re.compile("([0-9abcdef]+)\s+(\S.+)\soffset\s(\d+)-(\d+)$")
@@ -381,6 +373,7 @@ def process_subgraph(graph, dedupe_group) :
     return dedupe_group
 
 def optimize_dedupe_group(dedupe_group):
+    # NOT YET IMPLEMENTED
     # adds direct_files, direct_groups direct_csums fields
     #promots one (or more compatible) entry of each sub-group as direct, based on savings
     return dedupe_group
@@ -446,7 +439,6 @@ def graph_analysis(vector_set) :
 #------------------------------------
 # Main
 #------------------------------------
-idle_flag = False    #used when bypassing command line during debug with Python IDLE environment
 
 if __name__=="__main__":
 
@@ -472,38 +464,24 @@ if __name__=="__main__":
     
     (options, args) = parser.parse_args()
     
-    global d_file        #for IDLE, delete once idle_flag conditional removed
-    global dsub_file     #for IDLE
 
     global display_graph_flag
     global debug
 
-    debug = False                   #for IDLE -- enable debug message output
-    enable_subfile_analysis = True  #for IDLE
-    display_graph_flag = False      #for IDLE -- enables plotting of sub-graphs for debug
-    min_blocks = 2                  #for IDLE, delete after debug
     enable_subfile_analysis = True
     
-    if idle_flag :    #special case behavior when debugging with IDLE
-        #input files
-        d_file = '/users/doug/SW_Dev/dedupe/input_files/file_hashes_sorted.out'    
-        #d_file = '/users/doug/SW_Dev/dedupe/inpute_files/sorted_test_hashes.out'
-        dsub_file = '/users/doug/SW_Dev/dedupe/input_files/file_64k_subhashes.out'
-        #dsub_file = '/users/doug/SW_Dev/dedupe/input_files/file_1m_subhashes.out'
-        #dsub_file = '/users/doug/SW_Dev/dedupe/input_files/test_subhashes.out'
-    else:
-        debug = options.debug
-        min_blocks = options.min_blocks
-        display_graph_flag = options.show_graphs
-        if args:
-            d_file = args[0]
-            if len(args) == 2:
-                dsub_file = args[1]
-                enable_subfile_analysis = True
-            else:
-                enable_subfile_analysis = False
-        else :
-            raise MissingInputFiles
+    debug = options.debug
+    min_blocks = options.min_blocks
+    display_graph_flag = options.show_graphs
+    if args:
+        d_file = args[0]
+        if len(args) == 2:
+            dsub_file = args[1]
+            enable_subfile_analysis = True
+        else:
+            enable_subfile_analysis = False
+    else :
+        raise MissingInputFiles
         
     (d_file_base, ext) = string.rsplit(d_file, '.', 1)
     jdup_fname = d_file_base + '.json'      
