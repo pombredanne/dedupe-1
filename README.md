@@ -32,7 +32,7 @@ Command line
 	  -g, --show_graph      displays sub-graphs to console for debug purposes
 
 
-Sample Stat Sets:
+Sample Input Data Sets:
 
 	1) Simple data set for testing:
 	   
