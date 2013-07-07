@@ -6,6 +6,7 @@ import cPickle as pickle
 import string
 import json
 import re
+import uuid
 from optparse import OptionParser
 import itertools
 import pprint       #used for debug only
@@ -20,6 +21,8 @@ from fname_map import ChecksumMap
 #
 # python dedupe.py /users/doug/SW_Dev/dedupe/input_files/file_hashes_sorted.out
 # python dedupe.py /users/doug/SW_Dev/dedupe/input_files/file_hashes_sorted.out /users/doug/SW_Dev/dedupe/input_files/file_64k_subhashes.out
+# python /users/doug/SW_Dev/dedupe/dedupe.py /users/doug/SW_Dev/dedupe/test2/file_hashes.out /users/doug/SW_Dev/dedupe/test2/file_subhashes.out
+# python /users/doug/SW_Dev/dedupe/dedupe.py /users/doug/SW_Dev/dedupe/test3/file_hashes.out /users/doug/SW_Dev/dedupe/test3/file_subhashes.out
 #
 #------------------------------------------------
 
@@ -28,8 +31,10 @@ from fname_map import ChecksumMap
 # To Do:
 #
 #       1) Update command line parsing.  Replace with argparse since optparse depricated as of Python 2.7
-#       2) Optimize detected subgraphs
-#       3) Deallocate unused datastructures after pickling, where appropriate.
+#       2) Verify bode to resolve conflictig sets
+#       3) add code to promote preferred subgroup or file
+#       4) annotate groups with real file names and checksum values
+#       5) Deallocate unused datastructures after pickling, where appropriate.
 #
 # Generall Approach
 #
@@ -323,98 +328,169 @@ def find_conflicting_checksums(csums, graph):
             range_sets[range_val].append(hno)
         else:
             range_sets[range_val] = [hno]
-    print 'range sets:'        
-    pprint.pprint(range_sets)
-    return {'compatible':[value[0] for key, value in range_sets.items() if len(value) == 1],
-            #'conflicting': sum(value for key, value in range_sets.items() if len(value) > 1),
-            'conflicting': sum([value for key, value in range_sets.items() if len(value) > 1],[]),
-            'ranges': {key: value for key, value in range_sets.items() if len(value) > 1}}
 
-def process_subgraph(graph, files, csums, show_subgraph=False) :
-    print 'Bipartite Sub-Graph'
-    if show_subgraph:
+    compatible = [value[0] for key, value in range_sets.items() if len(value) == 1]
+    #below line is pythonic, but a bit confusing.  sum used to merge list of lists
+    conflicting = sum([value for key, value in range_sets.items() if len(value) > 1],[])
+    ranges = {key: value for key, value in range_sets.items() if len(value) > 1}
+    return compatible, conflicting, ranges
+    #return {'compat':compatible, 'conflict':conflicting, 'ranges':ranges}
+
+def path_pairs (path):
+    """Converts path into a set of node pairs, where pairs are encoded as a _ delimitted string"""
+    result = []
+    for i, node1 in enumerate(path, start=1):
+        if i <len(path):
+            node2 = path[i]
+            if node1 > node2:
+                result.append('{}_{}'.format(node1, node2))    #hack to make set intersection work
+            else:
+                result.append('{}_{}'.format(node2, node1))
+    return (set(result))
+            
+def path_intersection(paths):
+    """finds common segments among a set of paths"""
+    result = []
+    for i, path1 in enumerate(paths, start=1):
+        if i < len(paths):
+            path2 = paths[i]
+            common = path1.intersection(path2)
+            if len(common) > 0:
+                pairs = []
+                for node_pair_enc in common:
+                    pairs.append(node_pair_enc.split('_'))  #unencode node pair
+                result.append(pairs)
+    return result
+            
+def process_subgraph(graph, dedupe_group) :
+    print 'calling process_subgraph'
+    global process_subgraph_depth
+    process_subgraph_depth += 1
+    print 'depth: {}'.format(process_subgraph_depth)
+    pprint.pprint(dedupe_group)
+    files = dedupe_group['files']
+    csums = dedupe_group['csums']
+    if True:
+        print 'Bipartite Sub-Graph'
         nx.draw(graph)
         plt.show()
-    result = find_conflicting_checksums(csums, graph)
-    common_csums = result['compatible']
-    conflicting_csums = result['conflicting']
-    conflict_details = result['ranges']
-    print 'conflicting_csums'
-    pprint.pprint(conflicting_csums)
+    common_csums, conflicting_csums, conflict_details = find_conflicting_checksums(csums, graph)
     print 'common_csums'
     pprint.pprint(common_csums)
-    print 'conflict details'
+    print 'conflicting_csums'
+    pprint.pprint(conflicting_csums)
+    print 'conflicting_details'
     pprint.pprint(conflict_details)
-    print 'files: '
-    pprint.pprint(files)
-    #force error
-    if len(conflicting_csums) > 0:
-        new_graph = nx.subgraph(graph, files + conflicting_csums)
-        nx.draw(graph)
-        plt.show()
-        # function not yet implemented -- proposed approach
-        # 1) create sub-graph with conflicting csums and fill set of files
-        # 2) gather names of files w/o edges to conflicting csums
-        # 2a) associate files with parsent
-        # 2b) prune file nodes from graph
-        # 3) attempt to partition sub-tree
-        # 3a) case 1: sub-graphs == 1, pick set of connflicts with greatest savings and
-        #     promote to parent
-        # 3b) perform similar analysis on each new partition
-        # 4) final optimization, select of one each partition set of promote based on
-        #     savings potential
-        print 'conflicting_csums'
-        pprint.pprint(conflicting_csums)
-        print 'common_csums'
-        pprint.pprint(common_csums)
-        print 'conflict details'
-        pprint.pprint(conflict_details)
-        raise ValueError(conflict_details)
 
+
+    if len(conflict_details) > 0:
+        print 'conflict found'
+        # create sub-graph with conflicting csums and fill set of files       
+        new_graph = nx.subgraph(graph, files + conflicting_csums)
+        partitions = nx.connected_components(new_graph)
+        print 'partitions: '
+        pprint.pprint(partitions)
+        print 'conflicting Sub-Graph'
+        for node in nx.nodes(new_graph):
+            print 'node: {}'.format(node)
+            pprint.pprint(new_graph[node])
+        nx.draw(new_graph)
+        plt.show()
+
+        while len(partitions) == 1:
+            #break-up monolithic partition -- find paths between conflict pairs and break shortest path.
+            print 'inside loop'
+            paths = []
+            for src, target in conflict_details.values():
+                print 'src: {}  dest:{}'.format(src, target)
+                paths.append(path_pairs(nx.shortest_path(new_graph, src, target)))
+
+            common_paths = path_intersection(paths)
+            pprint.pprint(common_paths)
+
+            #for now, just break the first path and interate.  In future, may want to break multiple paths at once
+            if len(common_paths) == 0 or len(common_paths[0]) == 0:
+                raise ValueError('Error: Unexpected result - shoud be at least 1 common path pair')
+            pair = common_paths[0][0]    #arbitrarily pick first segment
+            new_graph.remove_edge(pair[0], pair[1])
+            partitions = nx.connected_components(new_graph)
+            common_csums, conflicting_csums, conflict_details = find_conflicting_checksums(csums, new_graph)
+            nx.draw(new_graph)
+            plt.show()
+            
+        print 'end of loop'
+        subgroups = process_partitions(partitions, new_graph)
+        print 'after process_partitions'
+        pprint.pprint(subgroups)
+        dedupe_group['subgroups'] = subgroups
 
     else:
-        proposed_parent_checksums = [ChecksumMap.get_hval_using_encoded_id(hno) for hno in csums]
-        proposed_child_files = [FnameMap.get_name_using_encoded_id(fno) for fno in files]
-        print 'proposed parent checksums:'
-        pprint.pprint(proposed_parent_checksums)
-        print 'files'
-        pprint.pprint(proposed_child_files)
-        tally = 0
-        for csum in csums:
-            tally += len(nx.edges(graph, csum)) - 1
-        print 'predicted savings: {} blocks'.format(tally)
-        return {'csums':proposed_parent_checksums,
-                'files':proposed_child_files,
-                'child_groups': [],
-                'savings':tally}
+        # no further sub-graphs
+        dedupe_group['subgroups'] = []
+
+    #now compute combined result for group and it's subgroups
+    subgroup_csums = []
+    subgroup_files = []
+    tally = 0
+    for subgroup in dedupe_group['subgroups']:
+        for csum in subgroup['csums']:
+            subgroup_csums.append(csum) 
+        for fname in subgroup['files']:
+            subgroup_files.append(fname) 
+        tally += subgroup['savings']
+    dedupe_group['selected_files'] = set(dedupe_group['files']) - set(subgroup_files)
+    dedupe_group['selected_csums'] = set(dedupe_group['csums']) - set(subgroup_csums)
+    for csum in csums:
+        tally += len(nx.edges(graph, csum)) - 1
+    print 'predicted savings: {} blocks'.format(tally)
+    dedupe_group['savings'] = tally
+    if True:
+        print 'returning from process_subgraph'
+        process_subgraph_depth -= 1
+        print 'depth: {}'.format(process_subgraph_depth)
+        print 'resulting dedupe_group'
+        pprint.pprint(dedupe_group)
+    return dedupe_group
+
+def optimize_dedupe_group(dedupe_group):
+    # adds direct_files, direct_groups direct_csums fields
+    #promots one (or more compatible) entry of each sub-group as direct, based on savings
+    return dedupe_group
 
 
-def filter_partitions(partitions, graph, show_subgraph=False) :
+def process_partitions(partitions, graph, singleton_filter=False ) :
     "processing of individual sub-graph"
-    
-    nodes, checksums =  bipartite.sets(graph) 
-    result = []
+    global process_partitions_depth
+    if False:
+        print 'calling process_partitions'
+        process_partitions_depth += 1
+        print 'depth: {}'.format(process_partitions_depth)
+    dedupe_groups = []
     for part in partitions :
-        #print 'part:'
-        #pprint.pprint(part)
-        new_part = {'f':[],'c':[]}
-        for nodenum in part :
-            if nodenum[0] == 'F':
-                new_part['f'].append(nodenum)
-            else :
-                new_part['c'].append(nodenum)
-        if len(new_part['f']) > 1 :  #only sub-graphs with multiple files
-            new_part['n'] = part
-            new_part['g'] = nx.subgraph(graph, part)
-            process_subgraph(new_part['g'], new_part['f'],
-                             new_part['c'], show_subgraph=show_subgraph)
-            #to do: collect result from process_subgraph
-            result.append(new_part)
-    return result
+        #print 'process_partitiot loop'
+        files = [nodenum for nodenum in part if nodenum[0] == 'F']
+        #pprint.pprint(files)
+        csums = [nodenum for nodenum in part if nodenum[0] == 'H']
+        #pprint.pprint(csums)
+
+        if (len(files) > 1) or (not singleton_filter):  #only sub-graphs with multiple files
+            #print 'entering if'
+            subgraph = nx.subgraph(graph, part)            
+            dedupe_group = {'name':uuid.uuid4(), 'files':files, 'csums':csums}
+            dedupe_group = process_subgraph(subgraph, dedupe_group)
+            dedupe_group = optimize_dedupe_group(dedupe_group)
+            #print 'dedupe_group:'
+            #pprint.pprint(dedupe_group)
+            dedupe_groups.append(dedupe_group)
+    if False:
+        print 'returning from process_partitions'
+        process_partitions_depth -= 1
+        print 'depth: {}'.format(process_partitions_depth)
+    return dedupe_groups
 
 
-def graph_analysis(vector_set, show_subgraph=False) :
-    "top level routine, partitions vector sets and identified common parent for a set of files"
+def build_graph_from_vectors(vector_set, show_subgraph=False) :
+    "creates top-level fraph from set of vectors"
 
     B = nx.Graph()
     for fno, hset in vector_set:
@@ -423,50 +499,28 @@ def graph_analysis(vector_set, show_subgraph=False) :
             if hno not in B :
                 B.add_node(ChecksumMap.encode(hno), bipartite=1)               
             B.add_edge(FnameMap.encode(fno), ChecksumMap.encode(hno))
-    print 'graph_analysis done'
+    return B
+
+
+def resolve_file_names(files):
+    resolved_files = [FnameMap.get_name_using_encoded_id(fno) for fno in files]
+    return resolved_files
+
+def dedupe_group_resolve_names(csums):
+    resolved_checksums = [ChecksumMap.get_hval_using_encoded_id(hno) for hno in csums]
+    return resolved_checksums
+
+def graph_analysis(vector_set) :
+    "top level routine, partitions vector sets and identified common parent for a set of files"
+
+    B = build_graph_from_vectors(vector_set)
     partitions = nx.connected_components(B)
-    filtered_partitions = filter_partitions(partitions, B, show_subgraph=show_subgraph)
-    return filtered_partitions
+    dedupe_groups = process_partitions(partitions, B, singleton_filter = True)
+
+    # To Do: remember to annotate groups with resolved checksums and file names
+    return dedupe_groups
 
 
-#--------------------------------
-# Boneyard - node to be deleted in subsequent version
-#--------------------------------
-
-def old_process_subgraph(graph, files, csums) :
-    global display_graph_flag
-    proj = bipartite.overlap_weighted_projected_graph(graph, files, csums)
-    if True:
-        print
-        print 'file centric analysis'
-        clustering = nx.bipartite.clustering(graph, files)       
-        print 'avg_clust:{}'.format(nx.bipartite.average_clustering(graph, files))
-        for node in files:
-            pprint.pprint(node)
-            print("file:{} edges: {}".format(node, len(nx.edges(graph, node))))           
-            print 'clust:{}'.format(clustering[node])
-        print
-        print 'checksum centric analysis'
-        clustering = nx.bipartite.clustering(graph, csums)       
-        print 'avg_clust:{}'.format(nx.bipartite.average_clustering(graph, files))
-        for node in csums:
-            pprint.pprint(node)
-            print("csum:{} edges: {}".format(node, len(nx.edges(graph, node))))           
-            print 'clust:{}'.format(clustering[node])
-        print 'find conflicting checksums'
-        conflicts = file_conflicting_checksums(csums, graph)
-        if len(conflicts) > 0:
-            print
-            print 'conflicting checksums'
-            pprint.pprint(conflicts)
-                
-            if  display_graph_flag:
-                print 'Bipartite Sub-Graph'
-                nx.draw(graph)
-                plt.show()
-                print 'Projected Sub-Graph'
-                nx.draw(proj)
-                plt.show()
            
 #------------------------------------
 # Main
@@ -503,11 +557,16 @@ if __name__=="__main__":
     global d_file        #for IDLE, delete once idle_flag conditional removed
     global dsub_file     #for IDLE
 
+    global process_subgraph_depth
+    process_subgraph_depth = 0
+    global process_partitions_depth
+    process_partitions_depth = 0
+
 
     debug = False                   #for IDLE -- enable debug message output
     status = True                   #for IDLE -- enable general status logging
     enable_subfile_analysis = True  #for IDLE
-    display_graph_flag = True       #for IDLE -- enables plotting of sub-graphs for debug
+    display_graph_flag = False      #for IDLE -- enables plotting of sub-graphs for debug
     min_blocks = 2                  #for IDLE, delete after debug
     enable_subfile_analysis = True
     
@@ -549,4 +608,4 @@ if __name__=="__main__":
                                               json_vectorset_fname=jvec_fname,
                                               list_vectorset_fname=lvec_fname)
         dprint('graph analysis', status)
-        graph_analysis(vector_set, show_subgraph=display_graph_flag)
+        graph_analysis(vector_set)
