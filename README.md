@@ -32,6 +32,32 @@ Command line
 	  -g, --show_graph      displays sub-graphs to console for debug purposes
 
 
+Sample Stat Sets:
+	1) Simple data set for testing:
+	   
+	   input_files/test_hashes_sorted.out.zip     [whole file]
+	   input_files/test_subhashes.out.zip         [sub file]
+	
+	
+	2) Large collection of files, includes whole-file and sub-file deduplication opportunities.  
+	   shared sub-groups within data set:
+	   
+	   input_files/file_hashes_sorted.out.zip     [whole file]
+	   input_files/file_64k_subhashes.out.zip     [sub file @ 64K granularity]
+	   input_files/file_1m_subhashes.out.zip      [alternative sub file @ 1m granularity]
+	   
+	   
+	3) Small set of files with sub-groups:
+	
+	    test2/file_hashes.out                     [dummy whole file, ho duplicates]
+	    test2/file_subhashes.out                  [sub file -- medium complexty single partition]
+	
+	4) small set of files sith sub-groups containing conflicting checksums:
+	
+	    test3/file_hashes.out                     [dummy whole file, ho duplicates]
+	    test3/file_subhashes.out                  [sub file -- more complex single partition]
+	
+
 Generall Approach
 
 1) Gather whole-file and sub-file signatures (MD5). See above.
