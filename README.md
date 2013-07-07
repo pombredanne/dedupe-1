@@ -33,6 +33,7 @@ Command line
 
 
 Sample Stat Sets:
+
 	1) Simple data set for testing:
 	   
 	   input_files/test_hashes_sorted.out.zip     [whole file]
