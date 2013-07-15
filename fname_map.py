@@ -1,7 +1,5 @@
 import string
 
-
-
 #---------------------------------------------------
 # Tables for mapping fname and hash values to numeric keys
 #---------------------------------------------------
@@ -33,23 +31,23 @@ class FnameMap(object):
     >>> FnameMap.reset()
     """
 
-    map2val = []  #maps id to file name
-    
+    map2val = []  # maps id to file name
+
     @classmethod
-    def get_id(cls, text) :
+    def get_id(cls, text):
         "Maps file names to unique file numbers and maintains mapping tables"
         idx = len(cls.map2val)
         cls.map2val.append(text)
         return idx
-    
+
     @classmethod
-    def get_name(cls, idx) :
+    def get_name(cls, idx):
         return cls.map2val[idx]
 
     @classmethod
     def get_name_using_encoded_id(cls, eidx):
         return cls.map2val[cls.decode(eidx)]
-    
+
     @classmethod
     def reset(cls):
         cls.map2val = []
@@ -75,8 +73,7 @@ class FnameMap(object):
         return int(idx)
 
 
-
-class ChecksumMap:    
+class ChecksumMap:
     """
     Class for mapping checksum values to numeric key, and maintaining counts
     >>> ChecksumMap.reset()
@@ -125,40 +122,40 @@ class ChecksumMap:
     counts = []
 
     @classmethod
-    def get_id(cls, hval) :
+    def get_id(cls, hval):
         "Maps hashes to unique hash numbers and maintains mapping tables"
-        fingerprint = hval['c']+hval['r'] #include range in checksum name
+        fingerprint = hval['c']+hval['r']  # include range in checksum name
         if fingerprint in cls.map2idx:
             idx = cls.map2idx[fingerprint]
             cls.counts[idx] += 1
             return idx
-        else :
+        else:
             idx = len(cls.map2hval)
             cls.map2idx[fingerprint] = idx
             cls.map2hval.append(hval)
             cls.counts.append(1)
             return idx
-        
+
     @classmethod
     def get_encoded_id(cls, hval):
         return cls.encode(cls.get_id(hval))
-        
+
     @classmethod
-    def get_hval(cls, idx) :
+    def get_hval(cls, idx):
         return cls.map2hval[idx]
 
     @classmethod
     def get_hval_using_encoded_id(cls, eidx):
         return cls.map2hval[cls.decode(eidx)]
-        
+
     @classmethod
     def get_range_using_encoded_id(cls, eidx):
         return cls.map2hval[cls.decode(eidx)]['r']
-    
+
     @classmethod
-    def get_count(cls,idx) :
+    def get_count(cls, idx):
         return cls.counts[idx]
-    
+
     @classmethod
     def reset(cls):
         cls.map2idx = {}
@@ -184,7 +181,7 @@ class ChecksumMap:
         """
         (node_type, idx) = string.rsplit(text, ':', 1)
         return int(idx)
- 
+
 
 if __name__ == "__main__":
     import doctest
